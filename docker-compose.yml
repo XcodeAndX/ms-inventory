@@ -1,0 +1,85 @@
+services:
+  products-db:
+    image: postgres:17
+    container_name: products-db
+    environment:
+      POSTGRES_DB: products_db
+      POSTGRES_USER: product_user
+      POSTGRES_PASSWORD: product_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - products_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U product_user -d products_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  inventory-db:
+    image: postgres:17
+    container_name: inventory-db
+    environment:
+      POSTGRES_DB: inventory_db
+      POSTGRES_USER: inventory_user
+      POSTGRES_PASSWORD: inventory_pass
+    ports:
+      - "5433:5432"
+    volumes:
+      - inventory_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inventory_user -d inventory_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  ms-products:
+    build:
+      context: ./ms_products
+      dockerfile: Dockerfile
+    container_name: ms-products
+    depends_on:
+      products-db:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://products-db:5432/products_db
+      DB_USER: product_user
+      DB_PASS: product_pass
+      API_KEY_HEADER: X-API-KEY
+      API_KEY_VALUE: product-secret-key
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+
+  ms-inventory:
+    build:
+      context: ./ms_inventory
+      dockerfile: Dockerfile
+    container_name: ms-inventory
+    depends_on:
+      inventory-db:
+        condition: service_healthy
+      ms-products:
+        condition: service_started
+    environment:
+      DB_URL: jdbc:postgresql://inventory-db:5432/inventory_db
+      DB_USER: inventory_user
+      DB_PASS: inventory_pass
+
+      # API key para proteger inventory
+      API_KEY_HEADER: X-API-KEY
+      API_KEY_VALUE: inventory-secret-key
+
+      # Cliente hacia products
+      PRODUCTS_BASE_URL: http://ms-products:8081
+      PRODUCTS_API_KEY_HEADER: X-API-KEY
+      PRODUCTS_API_KEY_VALUE: product-secret-key
+      PRODUCTS_TIMEOUT_MS: "2000"
+      PRODUCTS_RETRY_MAX: "2"
+    ports:
+      - "8082:8082"
+    restart: unless-stopped
+
+volumes:
+  products_db_data:
+  inventory_db_data:
